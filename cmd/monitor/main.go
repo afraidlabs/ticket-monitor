@@ -27,9 +27,7 @@ func main() {
 		panic(err)
 	}
 
-	ctx := context.Background()
-
-	storageClient, err := storage.NewClient(ctx)
+	storageClient, err := storage.NewClient(context.Background())
 
 	if err != nil {
 		panic(err)

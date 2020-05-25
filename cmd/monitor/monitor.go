@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -22,6 +24,10 @@ import (
 // Monitor is an instance of a monitor which scans for changes
 // from the specified SiteConfig.
 type Monitor struct {
+	// Mutex exists to prevent data races
+	// on the FileHashes
+	Mutex sync.Mutex
+
 	// Bucket is a Google Cloud Storage
 	// Bucket where files will be saved.
 	Bucket *storage.BucketHandle
@@ -62,8 +68,12 @@ type File struct {
 	// was found.
 	Bytes []byte
 
+	// Hash is the hash of the file with the
+	// SHAKE-256 algorithm.
+	Hash string
+
 	// GroupTag helps group together files
-	// on Supreme's website.
+	// from Supreme's website.
 	GroupTag string
 }
 
@@ -161,45 +171,79 @@ func (m *Monitor) Start() {
 func (m *Monitor) ProcessFiles(fileChannel <-chan *File) {
 	for file := range fileChannel {
 		if file != nil {
-			hashBytes := sha3.Sum256(file.Bytes)
-			hash := hex.EncodeToString(hashBytes[:])
-			if _, exists := m.FileHashes[hash]; !exists {
-				fmt.Printf("Found new file - %v - %v\n", file.URL.String(), hash)
-
-				basePath := path.Base(file.URL.Path)
-				name := fmt.Sprintf("%v/%v/%v", time.Now().Format(time.RFC1123), file.GroupTag, basePath)
-				object := m.Bucket.Object(name)
-
-				w := object.NewWriter(context.Background())
-
-				w.ObjectAttrs = storage.ObjectAttrs{
-					Name: name,
-					Metadata: map[string]string{
-						"shake-256":  hash,
-						"timestamp":  time.Now().Format(time.RFC3339Nano),
-						"proxy-url":  m.SiteConfig.ProxyURL,
-						"user-agent": m.Header.Get("User-Agent"),
-					},
-				}
-
-				_, err := w.Write(file.Bytes)
-				if err != nil {
-					// Handle Error
-					fmt.Println(err)
-					continue
-				}
-
-				if err := w.Close(); err != nil {
-					fmt.Println(err)
-					continue
-				}
-
-				m.FileHashes[hash] = true
-
-				fmt.Printf("Wrote File - %v - %v\n", basePath, hash)
-			}
+			go m.HandleFile(file)
 		}
 	}
+}
+
+// HandleFile processes a singular file and atempts
+// to uploads if it doesn't already exist.
+func (m *Monitor) HandleFile(file *File) {
+	hashBytes := sha3.Sum256(file.Bytes)
+	file.Hash = hex.EncodeToString(hashBytes[:])
+	if _, exists := m.FileHashes[file.Hash]; !exists {
+		m.Mutex.Lock()
+		m.FileHashes[file.Hash] = true
+		m.Mutex.Unlock()
+
+		for i := 0; i < 5; i++ {
+			err := m.UploadFile(file)
+
+			if err == nil {
+				return
+			}
+
+			// Handle Error
+			fmt.Println(err)
+		}
+
+	}
+}
+
+// UploadFile takes a file that doesnt already exist
+// and uploads to your Google CLoud Storage Bucket.
+func (m *Monitor) UploadFile(file *File) error {
+	fmt.Printf("Found new file - %v - %v\n", file.URL.String(), file.Hash)
+
+	randomBytes := make([]byte, 4)
+	_, err := rand.Read(randomBytes)
+
+	if err != nil {
+		return err
+	}
+
+	basePath := path.Base(file.URL.Path)
+	name := fmt.Sprintf("%s/%s/%s_%s", time.Now().Format(time.RFC1123), file.GroupTag, hex.EncodeToString(randomBytes), basePath)
+	object := m.Bucket.Object(name)
+
+	w := object.NewWriter(context.Background())
+
+	_, err = w.Write(file.Bytes)
+	if err != nil {
+		return err
+	}
+
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	uattrs := storage.ObjectAttrsToUpdate{
+		Metadata: map[string]string{
+			"file-url":   file.URL.String(),
+			"shake-256":  file.Hash,
+			"timestamp":  time.Now().Format(time.RFC3339Nano),
+			"proxy-url":  m.SiteConfig.ProxyURL,
+			"user-agent": m.Header.Get("User-Agent"),
+		},
+	}
+
+	_, err = object.Update(context.Background(), uattrs)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Wrote File - %s_%s - %s\n", hex.EncodeToString(randomBytes), basePath, file.Hash)
+	return nil
 }
 
 // ScanURL goes deeper into each url specified.
