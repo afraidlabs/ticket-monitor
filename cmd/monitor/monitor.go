@@ -77,12 +77,12 @@ var (
 	// ErrInvalidStatus occurs when a response's status is not 200 OK
 	ErrInvalidStatus = errors.New("monitor: invalid response status code")
 
-	// URLBlacklist contains a list of URLs to ignore on in the monitor
+	// URLBlacklist contains a list of URLs to ignore in the monitor
 	URLBlacklist = map[string]bool{
 		"google-analytics.com/ga.js": true,
 	}
 
-	// HostBlacklist contains a list of hostnames to ignore on in the monitor
+	// HostBlacklist contains a list of hostnames to ignore in the monitor
 	HostBlacklist = map[string]bool{
 		"cdn.mxpnl.com":                 true,
 		"www.google.com":                true,
