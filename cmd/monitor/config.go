@@ -6,8 +6,22 @@ import (
 	"io/ioutil"
 )
 
-// Config is a slice of every SiteConfig supplied
-type Config []*SiteConfig
+// Config is the main configuration for this application
+type Config struct {
+	// Sites is a slice of every specified
+	// SiteConfig in the configuration file.
+	Sites []SiteConfig `json:"sites"`
+
+	// WebhookURL is a Discord Webhook URL where
+	// updates on site changes will be sent.
+	// It is a required field.
+	WebhookURL string `json:"webhookUrl"`
+
+	// BucketName is the name of the
+	// Google Cloud Storage Bucket where
+	// new files will be saved to.
+	BucketName string `json:"bucketName"`
+}
 
 // SiteConfig are user supplied parameters for monitoring a certain Supreme region.
 type SiteConfig struct {
@@ -16,18 +30,17 @@ type SiteConfig struct {
 	// It is a required field.
 	URL string `json:"url"`
 
+	// Delay is the delay in milliseconds between
+	// a cycle of scanning URLs.
+	Delay int64 `json:"delay"`
+
 	// ProxyURL is an optional field where one may
-	// specify a Proxy URL per RFC 3986.
+	// specify a proxy per RFC 3986.
 	ProxyURL string `json:"proxyUrl"`
 
 	// ScanDepth is a customisable the depth limit
-	// of up to 255 URLs. It is a required field.
+	// of up to 255.
 	ScanDepth uint8 `json:"scanDepth"`
-
-	// WebhookURL is a Discord Webhook URL where
-	// updates on ticket changes will be sent.
-	// It is a required field.
-	WebhookURL string `json:"webhookUrl"`
 
 	// Headers is an optional object where you can
 	// specify request headers sent with all
@@ -36,35 +49,27 @@ type SiteConfig struct {
 }
 
 // readConfig reads and unmarshals a the config supplied in the
-// filename parameter and returns a Config. If it fails an error is returned.
-func readConfig(filename string) (Config, error) {
-	cfgFile, err := ioutil.ReadFile(filename)
+// path parameter and returns a Config. If it fails an error is returned.
+func readConfig(path string) (*Config, error) {
+	cfgFile, err := ioutil.ReadFile(path)
 
 	if err != nil {
 		return nil, err
 	}
 
-	var cfg Config
+	var config *Config
 
-	err = json.Unmarshal(cfgFile, &cfg)
+	err = json.Unmarshal(cfgFile, &config)
 
 	if err != nil {
 		return nil, err
 	}
 
-	for i, siteConfig := range cfg {
+	for i, siteConfig := range config.Sites {
 		if siteConfig.URL == "" {
 			return nil, fmt.Errorf("%w at index %v", ErrInvalidURL, i)
 		}
-
-		if siteConfig.ScanDepth == 0 {
-			return nil, fmt.Errorf("%w at index %v", ErrInvalidScanDepth, i)
-		}
-
-		if siteConfig.WebhookURL == "" {
-			return nil, fmt.Errorf("%w at index %v", ErrInvalidWebhookURL, i)
-		}
 	}
 
-	return cfg, nil
+	return config, nil
 }

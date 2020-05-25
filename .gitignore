@@ -14,5 +14,8 @@
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Ignore config files
+# Config files
 config.json
+
+# Google Service Account Key
+serviceAccountKey.json
